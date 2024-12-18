@@ -86,7 +86,7 @@ HTML_PAGE = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cyberpunk Market Dashboard with D3</title>
+<title>MarketStream</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 body {
@@ -117,14 +117,14 @@ header {
     border-radius: 8px;
     box-shadow: 0 0 10px #00ffff33;
     position: relative;
-    overflow: visible;
+    overflow: hidden;
 }
 .chart-box h2 {
     font-size: 0.9em;
     text-align: center;
     color: #0ff;
     margin: 0 0 10px 0;
-    text-shadow: 0 0 5px #0ff;
+    text-shadow: 0 0 3px #0ff;
     cursor: pointer;
     display: flex;
     justify-content: center;
@@ -171,13 +171,13 @@ footer {
 </style>
 </head>
 <body>
-<header>🚀 MARKET DATA 🚀</header>
+<header>🚀 MARKET_STREAM 🚀</header>
 
 <div class="chart-container" id="charts-container"></div>
 
 <div id="tooltip"></div>
 
-<footer> </footer>
+<footer>AD ASTER PER ASPERA</footer>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
@@ -213,9 +213,13 @@ function createChartContainer(ticker) {
             hideTooltip();
         });
 
-    const svg = container.append('svg');
     const width = 350 - margin.left - margin.right;
     const height = 200 - margin.top - margin.bottom;
+
+    const svg = container.append('svg')
+        // Explicitly set width and height here
+        .attr('width', width + margin.left + margin.right)
+        .attr('height', height + margin.top + margin.bottom);
 
     const g = svg.append('g')
         .attr('transform', `translate(${margin.left},${margin.top})`);
