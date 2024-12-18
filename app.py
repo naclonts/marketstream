@@ -177,7 +177,7 @@ footer {
 
 <div id="tooltip"></div>
 
-<footer>no f!n⟆l f0r(μ$ ↯ data is divine ᵯaccel3rate∞flow≠purpose #complexity</footer>
+<footer> </footer>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
