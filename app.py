@@ -184,7 +184,7 @@ footer {
 const TICKERS = {{tickers_json|safe}};
 const TICKER_INFO = {{ticker_info_json|safe}};
 
-const maxDataPoints = 30;
+const maxDataPoints = 60;
 
 // We'll store data arrays and charts in JS objects keyed by ticker
 const dataStore = {};
