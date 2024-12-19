@@ -148,7 +148,7 @@ header {
     pointer-events: none;
     z-index: 9999;
     display: none;
-    width: 250px;
+    width: 180px;
 }
 footer {
     text-align: center;
@@ -191,7 +191,10 @@ const dataStore = {};
 const charts = {};
 
 // Dimensions/margins for each chart
-const margin = {top: 10, right: 20, bottom: 20, left: 40};
+const margin = {top: 10, right: 50, bottom: 20, left: 40};
+
+// Tooltip element
+const tooltip = d3.select('#tooltip');
 
 function createChartContainer(ticker) {
     const container = d3.select('#charts-container')
@@ -217,23 +220,28 @@ function createChartContainer(ticker) {
     const height = 200 - margin.top - margin.bottom;
 
     const svg = container.append('svg')
-        // Explicitly set width and height here
         .attr('width', width + margin.left + margin.right)
         .attr('height', height + margin.top + margin.bottom);
 
     const g = svg.append('g')
         .attr('transform', `translate(${margin.left},${margin.top})`);
 
-    // Scales and axes (will be updated dynamically)
+    // Price scales and line
     const x = d3.scaleTime().range([0, width]);
     const y = d3.scaleLinear().range([height, 0]);
 
-    // Line generator
+    // Volume scale (right axis)
+    const yVolume = d3.scaleLinear().range([height, 0]);
+
+    // Line generator for price
     const line = d3.line()
         .x(d => x(d.time))
         .y(d => y(d.value));
 
-    // Add path
+    // Volume bars group
+    const volumeGroup = g.append('g').attr('class', 'volume-bars');
+
+    // Add path for price
     const path = g.append('path')
         .attr('fill', 'none')
         .attr('stroke', '#0ff')
@@ -249,11 +257,73 @@ function createChartContainer(ticker) {
         .attr('color', '#0ff')
         .attr('font-size', '8px');
 
+    // Volume axis on the right
+    const yVolumeAxisGroup = g.append('g')
+        .attr('transform', `translate(${width},0)`)
+        .attr('color', '#0ff')
+        .attr('font-size', '8px');
+
+    // Focus elements for tooltip on hover
+    const focusLine = g.append('line')
+        .attr('class', 'focus-line')
+        .attr('stroke', '#0ff')
+        .attr('stroke-dasharray', '3,3')
+        .attr('y1', 0)
+        .attr('y2', height)
+        .style('display', 'none');
+
+    const focusCircle = g.append('circle')
+        .attr('r', 3)
+        .attr('fill', '#0ff')
+        .style('display', 'none');
+
+    // Overlay for mouse events
+    const overlay = g.append('rect')
+        .attr('class', 'overlay')
+        .attr('width', width)
+        .attr('height', height)
+        .attr('fill', 'none')
+        .attr('pointer-events', 'all')
+        .on('mouseover', () => {
+            focusLine.style('display', null);
+            focusCircle.style('display', null);
+        })
+        .on('mouseout', () => {
+            hideTooltip();
+            focusLine.style('display', 'none');
+            focusCircle.style('display', 'none');
+        })
+        .on('mousemove', event => {
+            const d = dataStore[ticker];
+            if (!d || d.length === 0) return;
+            const mouseX = d3.pointer(event, this)[0];
+            const xPos = d3.pointer(event, g.node())[0];
+            const x0 = x.invert(xPos);
+
+            // Find the closest data point
+            const bisect = d3.bisector(d => d.time).left;
+            const i = bisect(d, x0, 1);
+            const d0 = d[i - 1];
+            const d1 = d[i];
+            const closest = !d1 ? d0 : (x0 - d0.time > d1.time - x0 ? d1 : d0);
+
+            // Update focus elements
+            focusLine.attr('x1', x(closest.time))
+                     .attr('x2', x(closest.time));
+            focusCircle.attr('cx', x(closest.time))
+                       .attr('cy', y(closest.value));
+
+            showTooltip(event, `Time: ${closest.time.toLocaleTimeString()}<br>Price: ${closest.value.toFixed(2)}<br>Volume: ${closest.volume}`);
+            moveTooltip(event);
+        });
+
     charts[ticker] = {
         svg: svg,
         g: g,
-        x, y, line, path,
+        x, y, yVolume, line, path,
         xAxisGroup, yAxisGroup,
+        yVolumeAxisGroup,
+        volumeGroup,
         width, height,
         valueSpan: valueSpan,
         lastVal: null
@@ -265,35 +335,69 @@ function updateChart(ticker) {
     const d = dataStore[ticker];
     if (!d || d.length === 0) return;
 
-    const {x, y, line, path, xAxisGroup, yAxisGroup, width, height} = chart;
+    const {x, y, line, path, xAxisGroup, yAxisGroup, width, height, yVolume, yVolumeAxisGroup, volumeGroup} = chart;
 
-    // Update scales
+    // Extract time, price, and volume arrays
     const times = d.map(pt => pt.time);
     const values = d.map(pt => pt.value);
+    const volumes = d.map(pt => pt.volume);
+
+    // Update X domain
     x.domain(d3.extent(times));
+
+    // Update Y (price) domain
     const minVal = d3.min(values);
     const maxVal = d3.max(values);
-
     let lowerBound = minVal;
     let upperBound = maxVal;
     if (Math.abs(maxVal - minVal) < 1e-8) {
         lowerBound = minVal - (minVal * 0.005);
         upperBound = maxVal + (maxVal * 0.005);
     } else {
-        // Add padding around min and max
         const range = maxVal - minVal;
         lowerBound = minVal - range * 0.05;
         upperBound = maxVal + range * 0.05;
     }
     y.domain([lowerBound, upperBound]);
 
-    // Update line path
-    path.datum(d)
-        .attr('d', line);
+    // Update Y (volume) domain similar to price domain logic
+    const minVol = d3.min(volumes) || 0;
+    const maxVol = d3.max(volumes) || 0;
+
+    let volLowerBound = minVol;
+    let volUpperBound = maxVol;
+    if (Math.abs(maxVol - minVol) < 1e-8) {
+        // If volumes are essentially the same, give a small padding around it
+        volLowerBound = Math.max(0, minVol - (minVol * 0.005));
+        volUpperBound = maxVol + (maxVol * 0.005);
+    } else {
+        // Add padding around min and max volume
+        const volRange = maxVol - minVol;
+        volLowerBound = Math.max(0, minVol - volRange * 0.05);
+        volUpperBound = maxVol + volRange * 0.05;
+    }
+    yVolume.domain([volLowerBound, volUpperBound]);
+
+    // Update line path (price)
+    path.datum(d).attr('d', line);
+
+    // Update volume bars
+    const barWidth = width / maxDataPoints * 0.8;
+    const bars = volumeGroup.selectAll('rect').data(d);
+    bars.enter().append('rect')
+        .merge(bars)
+        .attr('x', pt => x(pt.time) - barWidth/2)
+        .attr('y', pt => yVolume(pt.volume))
+        .attr('width', barWidth)
+        .attr('height', pt => height - yVolume(pt.volume))
+        .attr('fill', 'rgba(0,255,255,0.3)');
+
+    bars.exit().remove();
 
     // Update axes
     const xAxis = d3.axisBottom(x).ticks(5).tickSize(-height).tickFormat(d3.timeFormat('%H:%M:%S'));
     const yAxis = d3.axisLeft(y).ticks(5).tickSize(-width);
+    const yVolumeAxis = d3.axisRight(yVolume).ticks(5).tickSize(-width);
 
     xAxisGroup.call(xAxis)
         .selectAll('line')
@@ -306,19 +410,22 @@ function updateChart(ticker) {
         .attr('stroke', '#333');
     yAxisGroup.selectAll('path').attr('stroke', '#333');
     yAxisGroup.selectAll('text').attr('fill', '#0ff');
+
+    yVolumeAxisGroup.call(yVolumeAxis)
+        .selectAll('line')
+        .attr('stroke', '#333');
+    yVolumeAxisGroup.selectAll('path').attr('stroke', '#333');
+    yVolumeAxisGroup.selectAll('text').attr('fill', '#0ff');
 }
 
 // Tooltip functions
-const tooltip = d3.select('#tooltip');
 function showTooltip(event, html) {
-    tooltip.style('display', 'block')
-           .html(html);
-    moveTooltip(event);
+    tooltip.style('display', 'block').html(html);
 }
 function moveTooltip(event) {
-    const [x, y] = d3.pointer(event);
-    tooltip.style('left', (x + 20) + 'px')
-           .style('top', (y + window.scrollY + 20) + 'px');
+    const [mx, my] = d3.pointer(event);
+    tooltip.style('left', (mx + 40) + 'px')
+           .style('top', (my + window.scrollY + 20) + 'px');
 }
 function hideTooltip() {
     tooltip.style('display', 'none');
@@ -330,32 +437,50 @@ TICKERS.forEach(ticker => {
     createChartContainer(ticker);
 });
 
-function addDataPoint(ticker, value) {
+function addDataPoint(ticker, price, cumulativeVolume) {
     const now = new Date();
-    dataStore[ticker].push({time: now, value: +value});
-    if (dataStore[ticker].length > maxDataPoints) {
-        dataStore[ticker].shift();
+    const data = dataStore[ticker];
+
+    let intervalVolume = 0;
+    if (data.length > 0) {
+        const lastEntry = data[data.length - 1];
+        intervalVolume = cumulativeVolume - lastEntry.cumulativeVolume;
+    } else {
+        // For the first data point, there's no previous volume.
+        // We'll just set intervalVolume to 0 or cumulativeVolume as is.
+        intervalVolume = 0;
     }
 
-    // Update the chart
+    data.push({
+        time: now,
+        value: +price,
+        volume: intervalVolume,            // Store the calculated interval volume
+        cumulativeVolume: cumulativeVolume // Keep track of the cumulative volume
+    });
+
+    if (data.length > maxDataPoints) {
+        data.shift();
+    }
+
+    // Update the chart with the intervalVolume instead of cumulativeVolume
     updateChart(ticker);
 
-    // Update the displayed last value and color
+    // Update displayed last value and color (unchanged)
     const chart = charts[ticker];
     const prevVal = chart.lastVal;
-    chart.lastVal = value;
-    chart.valueSpan.text(value.toFixed(2));
+    chart.lastVal = price;
+    chart.valueSpan.text(price.toFixed(2));
 
     if (prevVal !== null) {
-        if (value > prevVal) {
+        if (price > prevVal) {
             chart.valueSpan.style("color", "limegreen");
-        } else if (value < prevVal) {
+        } else if (price < prevVal) {
             chart.valueSpan.style("color", "red");
         } else {
             chart.valueSpan.style("color", "#0ff");
         }
     } else {
-        chart.valueSpan.style("color", "#0ff"); // first value, no change detected yet
+        chart.valueSpan.style("color", "#0ff");
     }
 }
 
@@ -365,9 +490,10 @@ evtSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
     for (const ticker in data) {
         if (charts[ticker]) {
-            const val = data[ticker];
+            const val = data[ticker].price;
+            const vol = data[ticker].volume;
             if (val !== "N/A") {
-                addDataPoint(ticker, +val);
+                addDataPoint(ticker, +val, +vol);
             }
         }
     }
@@ -385,28 +511,42 @@ def index():
 
 @app.route("/stream")
 def stream():
-    def fetch_price(ticker):
+    def fetch_price_and_volume(ticker):
         t = yf.Ticker(ticker)
         price = None
-        # Attempt fast_info
+        volume = None
+        # Attempt fast_info for price and volume
         try:
             price = t.fast_info.last_price
+            volume = t.fast_info.last_volume
         except:
             pass
+        # If no fast_info volume, try info
+        if volume is None:
+            try:
+                info = t.info
+                volume = info.get("regularMarketVolume", 0)
+            except:
+                volume = 0
         if price is None:
             try:
                 info = t.info
                 price = info.get("regularMarketPrice")
             except:
                 price = None
-        return price
+
+        print(f"{ticker}: {price}, {volume}")
+        return price, volume
 
     def event_stream():
         while True:
             data = {}
             for tk in TICKERS:
-                val = fetch_price(tk)
-                data[tk] = val if val is not None else "N/A"
+                val, vol = fetch_price_and_volume(tk)
+                if val is not None:
+                    data[tk] = {"price": val, "volume": vol if vol is not None else 0}
+                else:
+                    data[tk] = {"price":"N/A", "volume":0}
             yield f"data: {json.dumps(data)}\n\n"
             time.sleep(10)  # Update every 10 seconds
     return Response(event_stream(), mimetype="text/event-stream")
