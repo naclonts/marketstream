@@ -360,30 +360,36 @@ function updateChart(ticker) {
     }
     y.domain([lowerBound, upperBound]);
 
-    // Update Y (volume) domain similar to price domain logic
-    const minVol = d3.min(volumes) || 0;
-    const maxVol = d3.max(volumes) || 0;
-
-    let volLowerBound = minVol;
-    let volUpperBound = maxVol;
-    if (Math.abs(maxVol - minVol) < 1e-8) {
-        // If volumes are essentially the same, give a small padding around it
-        volLowerBound = Math.max(0, minVol - (minVol * 0.005));
-        volUpperBound = maxVol + (maxVol * 0.005);
-    } else {
-        // Add padding around min and max volume
-        const volRange = maxVol - minVol;
-        volLowerBound = Math.max(0, minVol - volRange * 0.05);
-        volUpperBound = maxVol + volRange * 0.05;
-    }
-    yVolume.domain([volLowerBound, volUpperBound]);
-
     // Update line path (price)
     path.datum(d).attr('d', line);
 
-    // Update volume bars
-    const barWidth = width / maxDataPoints * 0.8;
+    // Compute min and max volumes
+    const minVol = d3.min(volumes) || 0;
+    const maxVol = d3.max(volumes) || 0;
+
+    let volLowerBound, volUpperBound;
+
+    if (maxVol <= 0) {
+        // If there's no volume data or all zeros, just set a small upper bound
+        volLowerBound = 0;
+        volUpperBound = 1;
+    } else {
+        // Normal scaling with padding
+        const volRange = maxVol - minVol;
+        if (Math.abs(volRange) < 1e-8) {
+            volLowerBound = Math.max(0, minVol - (minVol * 0.005));
+            volUpperBound = maxVol + (maxVol * 0.005);
+        } else {
+            volLowerBound = Math.max(0, minVol - volRange * 0.05);
+            volUpperBound = maxVol + volRange * 0.05;
+        }
+    }
+
+    yVolume.domain([volLowerBound, volUpperBound]);
+
+    // When drawing bars
     const bars = volumeGroup.selectAll('rect').data(d);
+    const barWidth = width / maxDataPoints * 0.8;
     bars.enter().append('rect')
         .merge(bars)
         .attr('x', pt => x(pt.time) - barWidth/2)
